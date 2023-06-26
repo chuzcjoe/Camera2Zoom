@@ -23,6 +23,7 @@ import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -40,7 +41,9 @@ public class Camera2Preview extends AppCompatActivity{
     private static final int CAMERA_PERMISSION_REQUEST = 100;
 
     private TextureView mTextureView;
-    private Button mTakePicutre;
+    private SeekBar mZoomBar;
+    private TextView mZoomText;
+
     private CameraCaptureSession mPreviewSession;
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
@@ -48,6 +51,10 @@ public class Camera2Preview extends AppCompatActivity{
     private CameraDevice mCameraDevice;
     private CameraCaptureSession mCaptureSession;
     private CaptureRequest.Builder mPreviewBuilder;
+
+    private float zoomMin = 0.5f;
+    private  float zoomMax = 2.0f;
+    private float zoomStep = 0.01f;
 
     private static final String[] PERMISSIONS = {
             Manifest.permission.CAMERA
@@ -59,10 +66,23 @@ public class Camera2Preview extends AppCompatActivity{
         super.onCreate(savedInstanceState);
         setContentView(R.layout.camera_preview);
 
+        //Get all UI components
         mTextureView = findViewById(R.id.preview);
+        mZoomBar = findViewById(R.id.zoomBar);
+        mZoomText = findViewById(R.id.zoomText);
+
+        //Set zoomBar min and max
+        mZoomBar.setMax((int) ((zoomMax-zoomMin) / zoomStep));
+        mZoomText.setText(String.valueOf(zoomMin));
+
         if (mTextureView != null) {
             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
         }
+
+        if (mZoomBar != null) {
+            mZoomBar.setOnSeekBarChangeListener(mSeekbarListener);
+        }
+
 
 
         Toast.makeText(this, "open preview success!", Toast.LENGTH_LONG).show();
@@ -84,6 +104,28 @@ public class Camera2Preview extends AppCompatActivity{
         stopBackgroundThread();
         super.onPause();
     }
+
+    private SeekBar.OnSeekBarChangeListener mSeekbarListener = new SeekBar.OnSeekBarChangeListener () {
+        @Override
+        public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+            // Convert the progress value back to the decimal step
+            float value = (float) (zoomMin + (progress * zoomStep));
+            value = (float) (Math.round(value * 100.0) / 100.0);
+
+            mZoomText.setText(String.valueOf(value));
+        }
+
+
+        @Override
+        public void onStartTrackingTouch(SeekBar seekBar) {
+            // Handle the start of tracking touch event
+        }
+
+        @Override
+        public void onStopTrackingTouch(SeekBar seekBar) {
+            // Handle the end of tracking touch event
+        }
+    };
 
     //Define the listener when TextureView is available
     private TextureView.SurfaceTextureListener mSurfaceTextureListener

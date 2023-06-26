@@ -34,6 +34,7 @@ import androidx.core.app.ActivityCompat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 public class Camera2Preview extends AppCompatActivity{
 
@@ -48,6 +49,12 @@ public class Camera2Preview extends AppCompatActivity{
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
     private String cameraID;
+
+    private String[] physicalCameraIDs;
+
+    private boolean isFirstOpen = false;
+
+    private boolean isSecondOpen = false;
     private CameraDevice mCameraDevice;
     private CameraCaptureSession mCaptureSession;
     private CaptureRequest.Builder mPreviewBuilder;
@@ -83,9 +90,12 @@ public class Camera2Preview extends AppCompatActivity{
             mZoomBar.setOnSeekBarChangeListener(mSeekbarListener);
         }
 
-
-
-        Toast.makeText(this, "open preview success!", Toast.LENGTH_LONG).show();
+        //Setup cameras, get all camera ids
+        try {
+            setUpCamera();
+        } catch (CameraAccessException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -113,6 +123,15 @@ public class Camera2Preview extends AppCompatActivity{
             value = (float) (Math.round(value * 100.0) / 100.0);
 
             mZoomText.setText(String.valueOf(value));
+
+            //Conditions when switching camera
+            if ((value > 1.0f && isFirstOpen) || (value < 1.0f && isSecondOpen)) {
+                try {
+                    switchCamera();
+                } catch (CameraAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
 
 
@@ -168,7 +187,13 @@ public class Camera2Preview extends AppCompatActivity{
         @Override
         public void onOpened(@NonNull CameraDevice cameraDevice) {
             mCameraDevice = cameraDevice;
-            startPreview();
+
+            if (isFirstOpen) {
+                startPreview(physicalCameraIDs[1]);
+            } else if (isSecondOpen) {
+                startPreview(physicalCameraIDs[0]);
+            }
+
         }
 
         @Override
@@ -184,20 +209,25 @@ public class Camera2Preview extends AppCompatActivity{
 
     };
 
-    private void startPreview() {
+    private void startPreview(String ID) {
         try {
+            List<OutputConfiguration> configurations = new ArrayList<>();
             SurfaceTexture texture = mTextureView.getSurfaceTexture();
             assert texture != null;
 
             // This is the output Surface we need to start preview.
             Surface surface = new Surface(texture);
 
+            OutputConfiguration outputConfiguration = new OutputConfiguration(surface);
+            outputConfiguration.setPhysicalCameraId(ID);
+            configurations.add(outputConfiguration);
+
             // We set up a CaptureRequest.Builder with the output Surface.
             mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewBuilder.addTarget(surface);
 
             // Here, we create a CameraCaptureSession for camera preview.
-            mCameraDevice.createCaptureSession(Arrays.asList(surface),
+            mCameraDevice.createCaptureSessionByOutputConfigurations(configurations,
                     new CameraCaptureSession.StateCallback() {
 
                         @Override
@@ -245,27 +275,74 @@ public class Camera2Preview extends AppCompatActivity{
         }
     }
 
+    private void setUpCamera() throws CameraAccessException {
+        CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
+        try {
+            String[] cameraIDs = manager.getCameraIdList();
+
+            //Get all back camera and their physical ids
+            for (String id : cameraIDs) {
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
+                int facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+
+                if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    continue;
+                } else if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    //Set logical camera
+                    cameraID = id;
+                    //Set physical camera
+                    Set<String> ids = characteristics.getPhysicalCameraIds();
+                    physicalCameraIDs = ids.toArray(new String[0]);
+                }
+            }
+
+            //Open first camera by default
+            isFirstOpen = true;
+            Toast.makeText(this, "open camera success, available cameras: [" + String.valueOf(physicalCameraIDs[0]) + ", " + physicalCameraIDs[1] + "]", Toast.LENGTH_SHORT).show();
+
+        } catch (CameraAccessException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
     private void openCamera() {
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
 
         try {
-            cameraID = manager.getCameraIdList()[0];
-            CameraCharacteristics  characteristics = manager.getCameraCharacteristics(cameraID);
-            StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-
-            assert map != null;
-
             //Check and grant permission
             if(ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[] {Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
                 return;
             }
             manager.openCamera(cameraID, mStateCallback, null);
+
         } catch (CameraAccessException e) {
             throw new RuntimeException(e);
         }
     }
 
+
+    public void closeCamera() {
+        if (mCameraDevice != null) {
+            mCameraDevice.close();
+            mCameraDevice = null;
+        }
+    }
+    private void switchCamera() throws CameraAccessException {
+        if (mCameraDevice != null && isFirstOpen) {
+            closeCamera();
+            isFirstOpen = false;
+            isSecondOpen = true;
+            openCamera();
+        } else if (mCameraDevice != null && isSecondOpen) {
+            closeCamera();
+            isFirstOpen = true;
+            isSecondOpen = false;
+            openCamera();
+        }
+    }
     private void updatePreview() throws CameraAccessException {
         mPreviewBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
         mCaptureSession.setRepeatingRequest(mPreviewBuilder.build(), null, mBackgroundHandler);

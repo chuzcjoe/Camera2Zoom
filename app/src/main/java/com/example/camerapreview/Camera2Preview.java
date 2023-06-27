@@ -1,6 +1,7 @@
 package com.example.camerapreview;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Fragment;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -15,6 +16,7 @@ import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.nfc.Tag;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -163,6 +165,7 @@ public class Camera2Preview extends AppCompatActivity{
                     throw new RuntimeException(e);
                 }
             }
+
         }
 
 
@@ -247,6 +250,7 @@ public class Camera2Preview extends AppCompatActivity{
 
     };
 
+    @SuppressLint("NewApi")
     private void startPreview(String ID) {
         try {
             List<OutputConfiguration> configurations = new ArrayList<>();
@@ -256,52 +260,88 @@ public class Camera2Preview extends AppCompatActivity{
             // We set up a CaptureRequest.Builder with the output Surface.
             mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
 
-            //For different camera, set the crop region accordingly
+            //For different camera, use different ways to create capture sessions
+            //UW
             if (ID == physicalCameraIDs[0]) {
                 Rect zoom = setUpZoomRect(rect1, mRatio);
                 mPreviewBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+
+                // This is the output Surface we need to start preview.
+                Surface surface = new Surface(texture);
+
+                OutputConfiguration outputConfiguration = new OutputConfiguration(surface);
+                outputConfiguration.setPhysicalCameraId(ID);
+                configurations.add(outputConfiguration);
+
+                mPreviewBuilder.addTarget(surface);
+
+                // Here, we create a CameraCaptureSession for camera preview.
+                mCameraDevice.createCaptureSessionByOutputConfigurations(configurations,
+                        new CameraCaptureSession.StateCallback() {
+
+                            @Override
+                            public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
+                                // The camera is already closed
+                                if (null == mCameraDevice) {
+                                    return;
+                                }
+
+                                // When the session is ready, we start displaying the preview.
+                                mCaptureSession = cameraCaptureSession;
+                                try {
+                                    updatePreview();
+                                } catch (CameraAccessException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+
+                            @Override
+                            public void onConfigureFailed(
+                                    @NonNull CameraCaptureSession cameraCaptureSession) {
+                                Toast.makeText(Camera2Preview.this, "show preview failed", Toast.LENGTH_SHORT).show();
+                            }
+                        }, null
+                );
             }
             else if (ID == physicalCameraIDs[1]) {
                 Rect zoom = setUpZoomRect(rect2, mRatio);
                 mPreviewBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+
+                // This is the output Surface we need to start preview.
+                Surface surface = new Surface(texture);
+
+                mPreviewBuilder.addTarget(surface);
+
+                // Here, we create a CameraCaptureSession for camera preview.
+                mCameraDevice.createCaptureSession(Arrays.asList(surface),
+                        new CameraCaptureSession.StateCallback() {
+
+                            @Override
+                            public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
+                                // The camera is already closed
+                                if (null == mCameraDevice) {
+                                    return;
+                                }
+
+                                // When the session is ready, we start displaying the preview.
+                                mCaptureSession = cameraCaptureSession;
+                                try {
+                                    updatePreview();
+                                } catch (CameraAccessException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+
+                            @Override
+                            public void onConfigureFailed(
+                                    @NonNull CameraCaptureSession cameraCaptureSession) {
+                                Toast.makeText(Camera2Preview.this, "show preview failed", Toast.LENGTH_SHORT).show();
+                            }
+                        }, null
+                );
             }
 
-            // This is the output Surface we need to start preview.
-            Surface surface = new Surface(texture);
 
-            OutputConfiguration outputConfiguration = new OutputConfiguration(surface);
-            outputConfiguration.setPhysicalCameraId(ID);
-            configurations.add(outputConfiguration);
-
-            mPreviewBuilder.addTarget(surface);
-
-            // Here, we create a CameraCaptureSession for camera preview.
-            mCameraDevice.createCaptureSessionByOutputConfigurations(configurations,
-                    new CameraCaptureSession.StateCallback() {
-
-                        @Override
-                        public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
-                            // The camera is already closed
-                            if (null == mCameraDevice) {
-                                return;
-                            }
-
-                            // When the session is ready, we start displaying the preview.
-                            mCaptureSession = cameraCaptureSession;
-                            try {
-                                updatePreview();
-                            } catch (CameraAccessException e) {
-                                e.printStackTrace();
-                            }
-                        }
-
-                        @Override
-                        public void onConfigureFailed(
-                                @NonNull CameraCaptureSession cameraCaptureSession) {
-                            Toast.makeText(Camera2Preview.this, "show preview failed", Toast.LENGTH_SHORT).show();
-                        }
-                    }, null
-            );
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -313,12 +353,12 @@ public class Camera2Preview extends AppCompatActivity{
         Rect zoom = null;
 
 
-        if (mRatio == zoomMin) {
+        if (ratio == zoomMin) {
             croppedWidth = 2;
             croppedHeight = 2;
         } else {
-            croppedWidth = Math.round((float)rect.width() * mRatio);
-            croppedHeight = Math.round((float)rect.height() * mRatio);
+            croppedWidth = Math.round((float)rect.width() * ratio);
+            croppedHeight = Math.round((float)rect.height() * ratio);
         }
 
 
@@ -348,6 +388,9 @@ public class Camera2Preview extends AppCompatActivity{
     private void setUpCamera() throws CameraAccessException {
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
 
+        float maxZoom1 = 0;
+        float maxZoom2 = 0;
+
         try {
             String[] cameraIDs = manager.getCameraIdList();
 
@@ -367,14 +410,19 @@ public class Camera2Preview extends AppCompatActivity{
 
                     CameraCharacteristics characteristics1 = manager.getCameraCharacteristics(physicalCameraIDs[0]);
                     rect1 = characteristics1.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+                    maxZoom1 = characteristics1.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
 
                     CameraCharacteristics characteristics2 = manager.getCameraCharacteristics(physicalCameraIDs[1]);
                     rect2 = characteristics2.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+                    maxZoom2 = characteristics2.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
 
                 }
             }
 
             Toast.makeText(this, "open camera success, available cameras: [" + String.valueOf(physicalCameraIDs[0]) + ", " + physicalCameraIDs[1] + "]", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, String.format("max zoom for camera1: %.1f, max zoom for camera2: %.1f", maxZoom1, maxZoom2), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "camera1 active array size " + rect1, Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "camera2 active array size " + rect2, Toast.LENGTH_LONG).show();
 
         } catch (CameraAccessException e) {
             throw new RuntimeException(e);

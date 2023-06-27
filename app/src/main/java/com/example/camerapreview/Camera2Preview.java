@@ -411,18 +411,22 @@ public class Camera2Preview extends AppCompatActivity{
                     CameraCharacteristics characteristics1 = manager.getCameraCharacteristics(physicalCameraIDs[0]);
                     rect1 = characteristics1.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
                     maxZoom1 = characteristics1.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
+                    int deviceLevel1 = characteristics1.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
 
                     CameraCharacteristics characteristics2 = manager.getCameraCharacteristics(physicalCameraIDs[1]);
                     rect2 = characteristics2.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
                     maxZoom2 = characteristics2.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
+                    int deviceLevel2 = characteristics2.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+
+                    Toast.makeText(this, String.format("camera: %s support level: %d\n camera: %s support level: %d", physicalCameraIDs[0], deviceLevel1, physicalCameraIDs[1], deviceLevel2), Toast.LENGTH_LONG).show();
 
                 }
             }
 
             Toast.makeText(this, "open camera success, available cameras: [" + String.valueOf(physicalCameraIDs[0]) + ", " + physicalCameraIDs[1] + "]", Toast.LENGTH_SHORT).show();
-            Toast.makeText(this, String.format("max zoom for camera1: %.1f, max zoom for camera2: %.1f", maxZoom1, maxZoom2), Toast.LENGTH_LONG).show();
-            Toast.makeText(this, "camera1 active array size " + rect1, Toast.LENGTH_LONG).show();
-            Toast.makeText(this, "camera2 active array size " + rect2, Toast.LENGTH_LONG).show();
+//            Toast.makeText(this, String.format("max zoom for camera1: %.1f, max zoom for camera2: %.1f", maxZoom1, maxZoom2), Toast.LENGTH_LONG).show();
+//            Toast.makeText(this, "camera1 active array size " + rect1, Toast.LENGTH_LONG).show();
+//            Toast.makeText(this, "camera2 active array size " + rect2, Toast.LENGTH_LONG).show();
 
         } catch (CameraAccessException e) {
             throw new RuntimeException(e);

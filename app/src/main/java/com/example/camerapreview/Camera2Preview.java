@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Fragment;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -17,6 +18,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Surface;
 import android.view.TextureView;
@@ -45,6 +47,8 @@ public class Camera2Preview extends AppCompatActivity{
     private SeekBar mZoomBar;
     private TextView mZoomText;
 
+    private float mRatio;
+
     private CameraCaptureSession mPreviewSession;
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
@@ -58,6 +62,10 @@ public class Camera2Preview extends AppCompatActivity{
     private CameraDevice mCameraDevice;
     private CameraCaptureSession mCaptureSession;
     private CaptureRequest.Builder mPreviewBuilder;
+
+    private Rect rect1;
+
+    private Rect rect2;
 
     private float zoomMin = 0.5f;
     private  float zoomMax = 2.0f;
@@ -77,6 +85,8 @@ public class Camera2Preview extends AppCompatActivity{
         mTextureView = findViewById(R.id.preview);
         mZoomBar = findViewById(R.id.zoomBar);
         mZoomText = findViewById(R.id.zoomText);
+
+        mRatio = zoomMin;
 
         //Set zoomBar min and max
         mZoomBar.setMax((int) ((zoomMax-zoomMin) / zoomStep));
@@ -121,13 +131,34 @@ public class Camera2Preview extends AppCompatActivity{
             // Convert the progress value back to the decimal step
             float value = (float) (zoomMin + (progress * zoomStep));
             value = (float) (Math.round(value * 100.0) / 100.0);
+            mRatio = 0.4f * value - 0.2f;
 
             mZoomText.setText(String.valueOf(value));
 
             //Conditions when switching camera
+            //1. zoom < 1.0 and second camera is open
+            //2. zoom > 1.0 and first camera is open
+            //3. zoom effect only takes place when value<0.9 or value>1.1, in order to protect the app from crash
             if ((value > 1.0f && isFirstOpen) || (value < 1.0f && isSecondOpen)) {
                 try {
+                    Log.d(TAG, "switching camera");
                     switchCamera();
+                } catch (CameraAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            } else if (value < 0.95f && isFirstOpen) {
+                Rect zoom = setUpZoomRect(rect1, mRatio);
+                mPreviewBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+                try {
+                    updatePreview();
+                } catch (CameraAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            } else if (value > 1.05f && isSecondOpen) {
+                Rect zoom = setUpZoomRect(rect2, mRatio);
+                mPreviewBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+                try {
+                    updatePreview();
                 } catch (CameraAccessException e) {
                     throw new RuntimeException(e);
                 }
@@ -188,10 +219,17 @@ public class Camera2Preview extends AppCompatActivity{
         public void onOpened(@NonNull CameraDevice cameraDevice) {
             mCameraDevice = cameraDevice;
 
-            if (isFirstOpen) {
-                startPreview(physicalCameraIDs[1]);
-            } else if (isSecondOpen) {
+            //First time open camera
+            if (!isFirstOpen && !isSecondOpen) {
                 startPreview(physicalCameraIDs[0]);
+                isFirstOpen = true;
+                return;
+            }
+
+            if (isFirstOpen) {
+                startPreview(physicalCameraIDs[0]);
+            } else if (isSecondOpen) {
+                startPreview(physicalCameraIDs[1]);
             }
 
         }
@@ -215,6 +253,19 @@ public class Camera2Preview extends AppCompatActivity{
             SurfaceTexture texture = mTextureView.getSurfaceTexture();
             assert texture != null;
 
+            // We set up a CaptureRequest.Builder with the output Surface.
+            mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+
+            //For different camera, set the crop region accordingly
+            if (ID == physicalCameraIDs[0]) {
+                Rect zoom = setUpZoomRect(rect1, mRatio);
+                mPreviewBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+            }
+            else if (ID == physicalCameraIDs[1]) {
+                Rect zoom = setUpZoomRect(rect2, mRatio);
+                mPreviewBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoom);
+            }
+
             // This is the output Surface we need to start preview.
             Surface surface = new Surface(texture);
 
@@ -222,8 +273,6 @@ public class Camera2Preview extends AppCompatActivity{
             outputConfiguration.setPhysicalCameraId(ID);
             configurations.add(outputConfiguration);
 
-            // We set up a CaptureRequest.Builder with the output Surface.
-            mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewBuilder.addTarget(surface);
 
             // Here, we create a CameraCaptureSession for camera preview.
@@ -256,6 +305,27 @@ public class Camera2Preview extends AppCompatActivity{
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    private Rect setUpZoomRect(Rect rect, float ratio) {
+        int croppedWidth;
+        int croppedHeight;
+        Rect zoom = null;
+
+
+        if (mRatio == zoomMin) {
+            croppedWidth = 2;
+            croppedHeight = 2;
+        } else {
+            croppedWidth = Math.round((float)rect.width() * mRatio);
+            croppedHeight = Math.round((float)rect.height() * mRatio);
+        }
+
+
+        zoom = new Rect(croppedWidth / 2, croppedHeight / 2, rect.width() - croppedWidth / 2, rect.height() - croppedHeight / 2);
+
+        return zoom;
+
     }
 
     private void startBackgroundThread() {
@@ -294,11 +364,16 @@ public class Camera2Preview extends AppCompatActivity{
                     //Set physical camera
                     Set<String> ids = characteristics.getPhysicalCameraIds();
                     physicalCameraIDs = ids.toArray(new String[0]);
+
+                    CameraCharacteristics characteristics1 = manager.getCameraCharacteristics(physicalCameraIDs[0]);
+                    rect1 = characteristics1.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+
+                    CameraCharacteristics characteristics2 = manager.getCameraCharacteristics(physicalCameraIDs[1]);
+                    rect2 = characteristics2.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+
                 }
             }
 
-            //Open first camera by default
-            isFirstOpen = true;
             Toast.makeText(this, "open camera success, available cameras: [" + String.valueOf(physicalCameraIDs[0]) + ", " + physicalCameraIDs[1] + "]", Toast.LENGTH_SHORT).show();
 
         } catch (CameraAccessException e) {

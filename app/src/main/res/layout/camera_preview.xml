@@ -33,12 +33,13 @@
         <SeekBar
             android:id="@+id/zoomBar"
             android:layout_width="300dp"
-            android:layout_height="10dp"
-            android:scrollbarSize="60dp"
-            android:thumbTint="#FF0000"
-            android:progressTint="#FF0000"
+            android:layout_height="35dp"
+            android:layout_marginTop="20dp"
             android:padding="20dp"
-            android:layout_marginTop="20dp" />
+            android:progressBackgroundTint="#DD1021"
+            android:scrollbarSize="60dp"
+            android:thumb="@drawable/seekbar_icon"
+            android:thumbTint="#FF0000" />
 
     </LinearLayout>
 
